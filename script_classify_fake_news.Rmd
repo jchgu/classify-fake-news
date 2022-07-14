@@ -1,0 +1,175 @@
+---
+title: 'Trustworthy or not? Classifying political news articles’ credibility with machine learning'
+output: html_notebook
+---
+
+# Data preparation
+```{r Load packages}
+library(readr)
+library(caret)
+library(quanteda)
+library(quanteda.textmodels)
+library(quanteda.textplots)
+library(quanteda.textstats)
+library(lexicon)
+```
+
+```{r Read data}
+data_fake <- read_csv('Fake.csv') |> mutate(type = 'fake')
+data_real <- read_csv('True.csv') |> mutate(type = 'real') 
+news <- rbind(data_real, data_fake) |> select(c(text, type))
+```
+
+```{r Randomize row order}
+set.seed(666)
+rows <- news |> nrow() |> sample()
+news <- news[rows,]
+```
+
+```{r Build corpus}
+corpus_all <- corpus(news, text_field = 'text')
+```
+
+```{r Preprocess text}
+tokens_all <- corpus_all |>
+ tokens(remove_punct = T, remove_numbers = T, remove_symbols = T, remove_url = T) |> #remove punctuations, numbers, symbols and URLs
+  tokens_tolower() |> #convert to lowercase 
+  tokens_remove(stopwords('en', 'nltk')) |> #remove stopwords in the list of Natural Language Toolkit (NLTK)
+  tokens_remove(c('reuters', '@\\w+', "\'s"), valuetype = 'regex') |> 
+  tokens_replace( #lemmatize
+    pattern = hash_lemmas$token, 
+    replacement = hash_lemmas$lemma) |>
+  tokens_keep(min_nchar = 2) #keep words with at least two characters
+``` 
+
+```{r Subset tokens by news type}
+tokens_real <- tokens_all |> 
+  tokens_subset(type == 'real')
+tokens_fake <- tokens_all |> 
+  tokens_subset(type == 'fake')
+```
+
+# Corpus statistics
+```{r Build DTM for credible news}
+dfm_real <- tokens_real |> dfm()
+```
+
+```{r Build DTM for fake news}
+dfm_fake <- tokens_fake |> dfm()
+```
+
+```{r Plot wordclouds}
+set.seed(666)
+textplot_wordcloud(dfm_real, max_words = 100)
+textplot_wordcloud(dfm_fake, max_words = 100)
+```
+
+```{r Word frequency tables}
+freqs_real <- textstat_frequency(dfm_real)
+freqs_real |> head(20)
+freqs_fake <- textstat_frequency(dfm_fake)
+freqs_fake |> head(20)
+```
+
+```{r Create testing and training sets}
+set.seed(999)
+testset <- tokens_all |> docnames() |> sample(9000) #about 25% 
+tokens_test <- tokens_all |> 
+  tokens_subset(docnames(tokens_all) %in% testset)
+tokens_train <- tokens_all |> 
+  tokens_subset(!docnames(tokens_all) %in% testset)
+factor_train <- docvars(tokens_train, 'type') |> as.factor()
+factor_test <- docvars(tokens_test, 'type') |> as.factor()
+```
+
+```{r Frequency tables by news type}
+table(factor_train)
+table(factor_test)
+```
+
+```{r Build DTM training set}
+dfm_train <- tokens_train |> dfm()
+```
+
+```{r Build DTM testing set}
+dfm_test <- tokens_test |> dfm() |>
+  dfm_match(featnames(dfm_train))
+```
+
+# Machine learning
+```{r Train Naive Bayes model}
+train_nb <- textmodel_nb(dfm_train, factor_train)
+summary(train_nb)
+```
+
+```{r Test Naive Bayes Model}
+predict_nb <- predict(train_nb, newdata = dfm_test)
+```
+
+```{r Compute predictive accuracy}
+mean(predict_nb == factor_test)
+```
+
+```{r Show confusion matrix and statistics}
+confusion_matrix <- confusionMatrix(predict_nb, factor_test, mode = 'everything')
+confusion_matrix
+```
+
+Get a list of Probability of Class Given Word scores (script by Wouter van Atteveldt!)
+```{r PCGW score}
+pc <- train_nb$priors |> as_tibble(rownames = 'class') |> 
+  rename(pc=value)
+# Get the p(w|c) from the params
+pcgw <- t(train_nb$param) |> 
+  as_tibble(rownames = 'word')  |>
+  # Pivot to wide and add p(c)
+  pivot_longer(-word, names_to = 'class', values_to = 'pwgc')  |>
+  inner_join(pc, by = character()) |> 
+  # Compute p(w)=sum(p(w|c)*p(c) and p(c|w)=p(w|c)*p(c)/p(w):
+  group_by(word) |>
+  mutate(pw = sum(pwgc*pc), 
+         pcgw = pwgc*pc/pw)
+pcgw <- pcgw |> arrange(-pcgw)
+```
+
+Create list of prediction errors & corpus containing only errors
+```{r Prediction errors}
+errors <- which(predict_nb != factor_test)
+error_names <- docnames(dfm_test)[errors]
+error_corpus <- corpus_all[error_names]
+```
+
+Get false positives and false negatives
+```{r Type I and II errors}
+false_fake <- corpus_subset(error_corpus, type == 'real')
+false_true <- corpus_subset(error_corpus, type == 'fake')
+```
+
+Create data frame of the test set containing doc ID, article text, type, prediction and variable marking if prediction was correct
+```{r}
+news_test <- corpus_all |>
+  corpus_subset(docnames(corpus_all) %in% testset)
+predictions <- tibble(
+  doc_id = names(predict_nb), 
+  prediction = predict_nb)
+actual_test <- tibble(
+  doc_id = names(news_test), 
+  type = factor_test)
+error_data <- merge(actual_test, predictions)
+```
+
+```{r}
+texts <- tibble(
+  doc_id = docnames(news_test), 
+  text = as.character(news_test)
+  )
+error_texts <- right_join(texts, error_data) |> 
+  mutate(
+    error = ifelse(
+      type == prediction, 
+      'correct', 
+      'wrong')
+    )
+```
+
+
