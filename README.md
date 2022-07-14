@@ -18,7 +18,7 @@ All data are publicly available.
 
 | Data files  | Source | Notes               | Provided |
 | ----------------- | ------ | ------------------- | -------- |
-| `Fake.csv` `Real.csv` | [ISOT Fake News Dataset](https://www.uvic.ca/ecs/ece/isot/datasets/fake-news/index.php)  |  | Yes |
+| `Fake.csv` `Real.csv` | [ISOT Lab](https://www.uvic.ca/ecs/ece/isot/datasets/fake-news/index.php)  |  | Yes (in the external site) |
 
 # Computational requirements
 
@@ -31,7 +31,7 @@ Less than ten minutes is needed to reproduce the analyses on a standard 2022 des
 
 # Instructions to Replicators
 
-Download `Real.csv`, `Fake.csv` and `script_classify_fake_news.Rmd`. Place them in the same folder. Run the script to execute all steps in sequence. 
+Download `Real.csv` and `Fake.csv` from the [ISOT Lab](https://www.uvic.ca/ecs/ece/isot/datasets/fake-news/index.php), and `script_classify_fake_news.Rmd` from this depository. Place them in the same folder. Run the script to execute all steps in sequence. 
 
 # Reference
 
